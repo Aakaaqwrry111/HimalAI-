@@ -1,284 +1,342 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { MessageSquare, Heart, Share2, MapPin, Send, Plus, Flame, X, Camera } from 'lucide-react';
+import { 
+  Send, Heart, AlertTriangle, MapPin, 
+  MessageSquare, ShieldAlert, Sparkles, Filter, CheckCircle2 
+} from 'lucide-react';
+import { useAuth } from '../../context/AuthContext';
+import { db } from '../../config/firebase';
+import { 
+  collection, addDoc, onSnapshot, query, orderBy, 
+  updateDoc, doc, arrayUnion, arrayRemove, serverTimestamp 
+} from 'firebase/firestore';
 
-interface Post {
+export interface FeedPost {
   id: string;
-  author: string;
-  role: string;
-  location: string;
-  timestamp: string;
+  userId: string;
+  userName: string;
+  userAvatar: string;
+  isPro: boolean;
   content: string;
-  tag: 'Trail Update' | 'Teahouse Review' | 'Safety Alert' | 'Experience';
-  likes: number;
-  commentsCount: number;
-  hazard?: boolean;
-  imageUrl?: string;
+  category: 'Trail Condition' | 'Hazard Alert' | 'Teahouse Update' | 'General';
+  location: string;
+  likes: string[]; // Array of User IDs
+  createdAt: any;
 }
 
-// 5 Rich, Authentic Nepali Trekking Experiences
-const INITIAL_POSTS: Post[] = [
+const INITIAL_MOCK_POSTS: FeedPost[] = [
   {
-    id: '1',
-    author: 'Akarshan',
-    role: 'Explorer Pathfinder',
-    location: 'Mardi Himal High Camp (3,580m)',
-    timestamp: '2 hours ago',
-    content: 'Woke up at 3:30 AM to push for the viewpoint. The way the morning sun hits Mount Machhapuchhre (Fishtail) makes every freezing step worth it. The trail is well-marked, but highly recommend crampons for the last 45 minutes as the black ice is very slippery right now. Dal Bhat at High Camp hits different after a 6-hour hike!',
-    tag: 'Experience',
-    likes: 142,
-    commentsCount: 18,
-    imageUrl: 'https://images.unsplash.com/photo-1544735716-392fe2489ffa?q=80&w=1000&auto=format&fit=crop'
+    id: 'mock_1',
+    userId: 'usr_mock_1',
+    userName: 'Pasang Sherpa',
+    userAvatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=250',
+    isPro: true,
+    content: 'Fresh landslide clearance near Bamboo on the ABC route. Trail is passable, but proceed with caution due to loose gravel.',
+    category: 'Hazard Alert',
+    location: 'Bamboo, Annapurna Circuit',
+    likes: ['usr_1', 'usr_2'],
+    createdAt: new Date(Date.now() - 3600000)
   },
   {
-    id: '2',
-    author: 'Sarah Jenkins',
-    role: 'Solo Trekker',
-    location: 'Gokyo Ri (5,357m)',
-    timestamp: '5 hours ago',
-    content: 'Just completed the Cho La Pass! It was grueling, but seeing the third Gokyo Lake from above is a spiritual experience. For anyone heading this way tomorrow: the rockfall zone near Dzongla is active due to the afternoon wind. Cross it before 11 AM.',
-    tag: 'Trail Update',
-    likes: 89,
-    commentsCount: 12,
-    imageUrl: 'https://images.unsplash.com/photo-1533604100650-7dc5e29bc353?q=80&w=1000&auto=format&fit=crop'
-  },
-  {
-    id: '3',
-    author: 'Pasang Dorje',
-    role: 'Certified Guide',
-    location: 'Thorong La Pass (5,416m)',
-    timestamp: '1 day ago',
-    content: 'Heavy snowfall reported on the Annapurna Circuit approach to Thorong La. We are holding our group at Thorong Phedi for an extra acclimatization day. Do not attempt the pass if you do not have a guide or proper deep-snow gaiters. Safety first, the mountains aren\'t going anywhere.',
-    tag: 'Safety Alert',
-    likes: 215,
-    commentsCount: 34,
-    hazard: true
-  },
-  {
-    id: '4',
-    author: 'Dr. Arjun Thapa',
-    role: 'Medical Volunteer',
-    location: 'Kyanjin Gompa, Langtang (3,870m)',
-    timestamp: '1 day ago',
-    content: 'The resilience of the Langtang valley never ceases to amaze me. Spent the afternoon at the local cheese factory and visiting the monastery. If you are staying here, visit the Dorje Bakery—best yak cheese apple pie in the Himalayas. The community here has rebuilt so beautifully.',
-    tag: 'Teahouse Review',
-    likes: 310,
-    commentsCount: 22,
-    imageUrl: 'https://images.unsplash.com/photo-1626082929543-5b8cb4604473?q=80&w=1000&auto=format&fit=crop'
-  },
-  {
-    id: '5',
-    author: 'Elena Rostova',
-    role: 'Photographer',
-    location: 'Manaslu Circuit - Samagaon',
-    timestamp: '2 days ago',
-    content: 'Far fewer crowds here than Everest or Annapurna. Just you, the roar of the Budhi Gandaki river, and ancient suspension bridges strung with prayer flags. The wind is fierce today. Make sure your permits for the restricted area are stamped at the previous checkpoint, they are checking strictly here!',
-    tag: 'Experience',
-    likes: 176,
-    commentsCount: 15,
-    imageUrl: 'https://images.unsplash.com/photo-1502027587841-f5139a099a9a?q=80&w=1000&auto=format&fit=crop'
+    id: 'mock_2',
+    userId: 'usr_mock_2',
+    userName: 'Akarshan Subedi',
+    userAvatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=250',
+    isPro: true,
+    content: 'High Camp teahouse has boosted solar Wi-Fi and solar shower heating restored today!',
+    category: 'Teahouse Update',
+    location: 'High Camp (3,700m)',
+    likes: ['usr_1'],
+    createdAt: new Date(Date.now() - 7200000)
   }
 ];
 
 export default function CommunityFeed() {
-  const [posts, setPosts] = useState<Post[]>(INITIAL_POSTS);
-  const [activeFilter, setActiveFilter] = useState<string>('All');
-  const [isPosting, setIsPosting] = useState(false);
-  const [selectedPost, setSelectedPost] = useState<Post | null>(null);
+  const { user, loginWithGoogle } = useAuth();
+  
+  const [posts, setPosts] = useState<FeedPost[]>(INITIAL_MOCK_POSTS);
+  const [newPostText, setNewPostText] = useState('');
+  const [locationTag, setLocationTag] = useState('');
+  const [category, setCategory] = useState<FeedPost['category']>('Trail Condition');
+  const [filter, setFilter] = useState<string>('All');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Form State
-  const [newContent, setNewContent] = useState('');
-  const [newLocation, setNewLocation] = useState('');
-  const [newTag, setNewTag] = useState<Post['tag']>('Experience');
+  // Subscribe to real-time Firestore updates
+  useEffect(() => {
+    try {
+      const q = query(collection(db, 'community_feed'), orderBy('createdAt', 'desc'));
+      const unsubscribe = onSnapshot(q, (snapshot) => {
+        if (!snapshot.empty) {
+          const livePosts = snapshot.docs.map((doc) => ({
+            id: doc.id,
+            ...doc.data()
+          })) as FeedPost[];
+          
+          // Combine live posts with initial mock data for a full UI experience
+          setPosts([...livePosts, ...INITIAL_MOCK_POSTS]);
+        }
+      }, (error) => {
+        console.warn('Firestore fallback active:', error);
+      });
 
-  const handlePostSubmit = (e: React.FormEvent) => {
+      return () => unsubscribe();
+    } catch (e) {
+      console.warn('Firestore offline or unconfigured, using local state mode');
+    }
+  }, []);
+
+  // Handle publishing a new post
+  const handleCreatePost = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newContent.trim() || !newLocation.trim()) return;
+    if (!newPostText.trim()) return;
 
-    const newPost: Post = {
-      id: Date.now().toString(),
-      author: 'Akarshan', 
-      role: 'Explorer Pathfinder',
-      location: newLocation,
-      timestamp: 'Just now',
-      content: newContent,
-      tag: newTag,
-      likes: 0,
-      commentsCount: 0,
-      hazard: newTag === 'Safety Alert'
+    if (!user) {
+      loginWithGoogle();
+      return;
+    }
+
+    setIsSubmitting(true);
+
+    const postPayload = {
+      userId: user.id,
+      userName: user.name,
+      userAvatar: user.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&q=80&w=250',
+      isPro: user.isPro || false,
+      content: newPostText.trim(),
+      category: category,
+      location: locationTag.trim() || 'Himalayan Trail Wire',
+      likes: [user.id],
+      createdAt: serverTimestamp()
     };
 
-    setPosts([newPost, ...posts]);
-    setNewContent('');
-    setNewLocation('');
-    setIsPosting(false);
+    try {
+      // Try writing to Firestore
+      await addDoc(collection(db, 'community_feed'), postPayload);
+    } catch (err) {
+      // Fallback local state insertion if Firestore rules/connection are pending
+      const localPost: FeedPost = {
+        ...postPayload,
+        id: 'local_' + Date.now(),
+        createdAt: new Date()
+      };
+      setPosts((prev) => [localPost, ...prev]);
+    } finally {
+      setNewPostText('');
+      setLocationTag('');
+      setIsSubmitting(false);
+    }
   };
 
-  const filteredPosts = activeFilter === 'All' 
-    ? posts 
-    : activeFilter === 'Safety' 
-      ? posts.filter(p => p.hazard || p.tag === 'Safety Alert')
-      : posts.filter(p => p.tag === activeFilter);
+  // Handle Like/Upvote Toggle
+  const handleToggleLike = async (postId: string, currentLikes: string[]) => {
+    if (!user) {
+      loginWithGoogle();
+      return;
+    }
+
+    const hasLiked = currentLikes.includes(user.id);
+
+    // Optimistic UI update
+    setPosts((prev) =>
+      prev.map((post) => {
+        if (post.id === postId) {
+          const updatedLikes = hasLiked
+            ? post.likes.filter((id) => id !== user.id)
+            : [...post.likes, user.id];
+          return { ...post, likes: updatedLikes };
+        }
+        return post;
+      })
+    );
+
+    // Sync with Firestore if it's a remote post
+    if (!postId.startsWith('mock_') && !postId.startsWith('local_')) {
+      try {
+        const postRef = doc(db, 'community_feed', postId);
+        await updateDoc(postRef, {
+          likes: hasLiked ? arrayRemove(user.id) : arrayUnion(user.id)
+        });
+      } catch (err) {
+        console.error('Failed to sync like with server:', err);
+      }
+    }
+  };
+
+  // Filter posts based on selected category pill
+  const filteredPosts = posts.filter((post) => {
+    if (filter === 'All') return true;
+    return post.category === filter;
+  });
 
   return (
-    <div className="min-h-screen pt-28 pb-16 px-6 max-w-3xl mx-auto text-white relative">
+    <div className="min-h-screen pt-28 pb-16 px-6 max-w-4xl mx-auto text-white">
       
-      {/* Header */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-8 gap-4 border-b border-white/10 pb-6">
-        <div>
-          <div className="flex items-center gap-2 text-accent-temple-gold mb-1 font-mono text-xs uppercase tracking-widest">
-            <Flame size={14} /> Himalayan Live Wire
-          </div>
-          <h1 className="text-4xl font-display font-bold">Community Basecamp</h1>
+      {/* Header Section */}
+      <div className="mb-8 text-center md:text-left">
+        <div className="inline-flex items-center gap-2 text-accent-temple-gold text-xs font-mono uppercase tracking-widest bg-accent-temple-gold/10 px-3 py-1 rounded-full border border-accent-temple-gold/20 mb-3">
+          <Sparkles size={14} /> Crowdsourced Trail Intelligence
         </div>
-        <button 
-          onClick={() => setIsPosting(!isPosting)}
-          className="bg-gradient-to-r from-accent-temple-gold to-orange-500 text-black font-bold px-5 py-2.5 rounded-full flex items-center gap-2 shadow-lg shadow-accent-temple-gold/20 hover:scale-105 transition-all"
-        >
-          <Plus size={18} /> Share Journey
-        </button>
+        <h1 className="text-3xl md:text-4xl font-display font-bold mb-2">Community Trail Wire</h1>
+        <p className="text-white/60 text-sm">Real-time hazard dispatches, teahouse status updates, and trail conditions directly from active trekkers.</p>
+      </div>
+
+      {/* Post Creation Box */}
+      <div className="glass-panel bg-neutral-900/80 border border-white/10 p-6 rounded-3xl mb-10 shadow-2xl">
+        {user ? (
+          <form onSubmit={handleCreatePost} className="space-y-4">
+            <div className="flex items-center gap-3 mb-2">
+              <img src={user.avatar} alt={user.name} className="w-10 h-10 rounded-full border border-accent-temple-gold object-cover" />
+              <div>
+                <p className="font-bold text-sm">{user.name}</p>
+                <p className="text-xs text-white/50">Posting live to Trail Wire</p>
+              </div>
+            </div>
+
+            <textarea
+              value={newPostText}
+              onChange={(e) => setNewPostText(e.target.value)}
+              placeholder="Report trail conditions, weather updates, or teahouse details..."
+              rows={3}
+              className="w-full bg-white/5 border border-white/10 rounded-2xl p-4 text-sm focus:outline-none focus:border-accent-temple-gold transition-colors text-white placeholder-white/30 resize-none"
+            />
+
+            <div className="flex flex-wrap items-center justify-between gap-4 pt-2">
+              
+              <div className="flex items-center gap-2 flex-wrap">
+                {/* Category Selection */}
+                <select
+                  value={category}
+                  onChange={(e) => setCategory(e.target.value as FeedPost['category'])}
+                  className="bg-neutral-800 text-xs text-white/80 border border-white/15 px-3 py-2 rounded-xl focus:outline-none"
+                >
+                  <option value="Trail Condition">Trail Condition</option>
+                  <option value="Hazard Alert">⚠️ Hazard Alert</option>
+                  <option value="Teahouse Update">🛖 Teahouse Update</option>
+                  <option value="General">💬 General Dispatch</option>
+                </select>
+
+                {/* Location Tag Input */}
+                <div className="flex items-center gap-1.5 bg-white/5 border border-white/10 px-3 py-1.5 rounded-xl text-xs text-white/70">
+                  <MapPin size={14} className="text-accent-temple-gold shrink-0" />
+                  <input
+                    type="text"
+                    value={locationTag}
+                    onChange={(e) => setLocationTag(e.target.value)}
+                    placeholder="Tag Location (e.g., Deurali)"
+                    className="bg-transparent focus:outline-none w-36 text-xs text-white placeholder-white/30"
+                  />
+                </div>
+              </div>
+
+              <button
+                type="submit"
+                disabled={isSubmitting || !newPostText.trim()}
+                className="bg-gradient-to-r from-accent-temple-gold to-orange-500 text-black font-bold px-6 py-2.5 rounded-xl text-xs uppercase tracking-wider flex items-center gap-2 transition-all hover:scale-105 active:scale-95 disabled:opacity-50 disabled:pointer-events-none"
+              >
+                <Send size={14} /> Dispatch
+              </button>
+            </div>
+          </form>
+        ) : (
+          <div className="text-center py-6">
+            <ShieldAlert size={32} className="mx-auto text-accent-temple-gold mb-3" />
+            <p className="font-bold mb-1">Join the Himalayan Safety Network</p>
+            <p className="text-xs text-white/60 mb-4">Log in with your Google account to post live trail alerts and upvote reports.</p>
+            <button
+              onClick={loginWithGoogle}
+              className="bg-white text-black font-bold px-6 py-2.5 rounded-full text-xs uppercase tracking-wider hover:bg-neutral-200 transition-all"
+            >
+              Sign In to Post
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Filter Tabs */}
-      <div className="flex gap-2 overflow-x-auto pb-4 mb-6 custom-scrollbar">
-        {['All', 'Experience', 'Safety Alert', 'Trail Update', 'Teahouse Review'].map(filter => (
-          <button 
-            key={filter}
-            onClick={() => setActiveFilter(filter)}
-            className={`px-4 py-2 rounded-full text-xs font-bold uppercase tracking-wider whitespace-nowrap transition-all ${
-              activeFilter === filter 
-                ? 'bg-accent-temple-gold text-black' 
-                : 'bg-white/5 text-white/60 hover:bg-white/10 border border-white/10'
+      <div className="flex items-center gap-2 overflow-x-auto pb-4 mb-6 no-scrollbar">
+        {['All', 'Hazard Alert', 'Trail Condition', 'Teahouse Update', 'General'].map((cat) => (
+          <button
+            key={cat}
+            onClick={() => setFilter(cat)}
+            className={`px-4 py-2 rounded-full text-xs font-bold transition-all whitespace-nowrap flex items-center gap-1.5 ${
+              filter === cat
+                ? 'bg-accent-temple-gold text-black shadow-lg shadow-accent-temple-gold/10'
+                : 'bg-white/5 border border-white/10 text-white/70 hover:text-white'
             }`}
           >
-            {filter}
+            {cat === 'Hazard Alert' && <AlertTriangle size={12} className={filter === cat ? 'text-black' : 'text-red-400'} />}
+            {cat}
           </button>
         ))}
       </div>
 
-      {/* Feed List */}
-      <div className="space-y-6">
-        {filteredPosts.map((post, idx) => (
-          <motion.div 
-            key={post.id}
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: idx * 0.05 }}
-            onClick={() => setSelectedPost(post)}
-            className={`glass-panel bg-black/40 border p-0 rounded-3xl overflow-hidden cursor-pointer group transition-all ${
-              post.hazard ? 'border-red-500/40 hover:border-red-500/80' : 'border-white/10 hover:border-white/30'
-            }`}
-          >
-            {/* If post has an image, render it at the top */}
-            {post.imageUrl && (
-              <div className="w-full h-56 overflow-hidden relative">
-                <img 
-                  src={post.imageUrl} 
-                  alt={post.location} 
-                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700"
-                />
-                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent" />
-              </div>
-            )}
+      {/* Live Feed List */}
+      <div className="space-y-4">
+        <AnimatePresence initial={false}>
+          {filteredPosts.map((post) => {
+            const hasLiked = user ? post.likes.includes(user.id) : false;
 
-            <div className="p-6">
-              <div className="flex justify-between items-start mb-4">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-accent-temple-gold to-orange-600 flex items-center justify-center font-bold text-black text-sm shadow">
-                    {post.author.charAt(0)}
-                  </div>
-                  <div>
-                    <h4 className="font-bold text-sm text-white flex items-center gap-2">
-                      {post.author}
-                    </h4>
-                    <p className="text-xs text-white/40 flex items-center gap-1 mt-0.5">
-                      <MapPin size={12} className="text-accent-temple-gold" /> {post.location} • {post.timestamp}
-                    </p>
-                  </div>
+            return (
+              <motion.div
+                key={post.id}
+                initial={{ opacity: 0, y: 15 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.95 }}
+                className="glass-panel bg-neutral-900/60 border border-white/10 p-6 rounded-3xl relative hover:border-white/20 transition-all"
+              >
+                {/* Category Badge & Location */}
+                <div className="flex items-center justify-between gap-2 mb-4">
+                  <span className={`text-[10px] font-bold uppercase tracking-wider px-3 py-1 rounded-full flex items-center gap-1 ${
+                    post.category === 'Hazard Alert'
+                      ? 'bg-red-500/20 text-red-400 border border-red-500/30'
+                      : post.category === 'Teahouse Update'
+                      ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
+                      : 'bg-accent-temple-gold/20 text-accent-temple-gold border border-accent-temple-gold/30'
+                  }`}>
+                    {post.category === 'Hazard Alert' && <AlertTriangle size={12} />}
+                    {post.category}
+                  </span>
+
+                  <span className="text-xs text-white/50 flex items-center gap-1">
+                    <MapPin size={12} className="text-accent-temple-gold" /> {post.location}
+                  </span>
                 </div>
-                <span className={`text-[10px] font-mono px-3 py-1 rounded-full border uppercase ${
-                  post.tag === 'Safety Alert' ? 'bg-red-500/20 border-red-500/40 text-red-400 font-bold' : 'bg-white/5 border-white/10 text-white/60'
-                }`}>
-                  {post.tag}
-                </span>
-              </div>
 
-              {/* Truncated text for the feed view */}
-              <p className="text-white/80 text-sm leading-relaxed mb-4 line-clamp-3">
-                {post.content}
-              </p>
+                {/* Content */}
+                <p className="text-sm text-white/90 font-sans leading-relaxed mb-4">{post.content}</p>
 
-              <div className="flex items-center gap-6 pt-4 border-t border-white/10 text-xs text-white/50">
-                <span className="flex items-center gap-1.5 hover:text-accent-temple-gold transition-colors"><Heart size={16} /> {post.likes}</span>
-                <span className="flex items-center gap-1.5 hover:text-accent-temple-gold transition-colors"><MessageSquare size={16} /> {post.commentsCount}</span>
-                <span className="ml-auto text-accent-temple-gold font-medium group-hover:underline">Read Full Story &rarr;</span>
-              </div>
-            </div>
-          </motion.div>
-        ))}
+                {/* Footer / User Info & Likes */}
+                <div className="flex items-center justify-between pt-3 border-t border-white/5 text-xs">
+                  <div className="flex items-center gap-2.5">
+                    <img src={post.userAvatar} alt={post.userName} className="w-7 h-7 rounded-full object-cover border border-white/20" />
+                    <div>
+                      <span className="font-bold text-white/80">{post.userName}</span>
+                      {post.isPro && (
+                        <span className="ml-1.5 text-[9px] bg-accent-temple-gold/10 text-accent-temple-gold px-1.5 py-0.5 rounded font-mono font-bold">
+                          PRO
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={() => handleToggleLike(post.id, post.likes)}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border transition-all ${
+                      hasLiked
+                        ? 'bg-red-500/20 border-red-500/40 text-red-400'
+                        : 'bg-white/5 border-white/10 text-white/60 hover:text-white'
+                    }`}
+                  >
+                    <Heart size={14} className={hasLiked ? 'fill-red-500 text-red-500' : ''} />
+                    <span className="font-bold">{post.likes.length}</span>
+                  </button>
+                </div>
+              </motion.div>
+            );
+          })}
+        </AnimatePresence>
       </div>
 
-      {/* Expanded Post Modal */}
-      <AnimatePresence>
-        {selectedPost && (
-          <motion.div 
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm"
-            onClick={() => setSelectedPost(null)}
-          >
-            <motion.div 
-              initial={{ scale: 0.95, opacity: 0, y: 20 }}
-              animate={{ scale: 1, opacity: 1, y: 0 }}
-              exit={{ scale: 0.95, opacity: 0, y: 20 }}
-              onClick={(e) => e.stopPropagation()}
-              className="w-full max-w-2xl bg-neutral-900 border border-white/10 rounded-3xl overflow-hidden shadow-2xl relative max-h-[90vh] overflow-y-auto custom-scrollbar"
-            >
-              <button 
-                onClick={() => setSelectedPost(null)}
-                className="absolute top-4 right-4 z-10 w-8 h-8 bg-black/50 backdrop-blur-md rounded-full flex items-center justify-center text-white/70 hover:text-white border border-white/10"
-              >
-                <X size={16} />
-              </button>
-
-              {selectedPost.imageUrl && (
-                <img src={selectedPost.imageUrl} alt={selectedPost.location} className="w-full h-72 md:h-96 object-cover" />
-              )}
-              
-              <div className="p-6 md:p-8">
-                <div className="flex items-center gap-3 mb-6">
-                  <div className="w-12 h-12 rounded-full bg-gradient-to-tr from-accent-temple-gold to-orange-600 flex items-center justify-center font-bold text-black text-lg">
-                    {selectedPost.author.charAt(0)}
-                  </div>
-                  <div>
-                    <h4 className="font-bold text-lg text-white">{selectedPost.author}</h4>
-                    <p className="text-sm text-accent-temple-gold flex items-center gap-1">
-                      <MapPin size={14} /> {selectedPost.location}
-                    </p>
-                  </div>
-                </div>
-
-                <p className="text-white/90 text-base md:text-lg leading-relaxed mb-8 font-light">
-                  {selectedPost.content}
-                </p>
-
-                <div className="flex items-center gap-4 pt-6 border-t border-white/10">
-                  <button className="flex-1 bg-white/5 hover:bg-white/10 text-white py-3 rounded-xl font-bold flex items-center justify-center gap-2 transition-colors">
-                    <Heart size={18} /> Like
-                  </button>
-                  <button className="flex-1 bg-white/5 hover:bg-white/10 text-white py-3 rounded-xl font-bold flex items-center justify-center gap-2 transition-colors">
-                    <MessageSquare size={18} /> Comment
-                  </button>
-                  <button className="px-4 py-3 bg-white/5 hover:bg-white/10 text-white rounded-xl transition-colors">
-                    <Share2 size={18} />
-                  </button>
-                </div>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
     </div>
   );
 }

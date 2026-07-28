@@ -13,6 +13,7 @@ import CommunityFeed from '../features/community/CommunityFeed';
 import TeahouseLedger from '../features/teahouse/TeahouseLedger';
 import BiometricStream from '../features/treksafe/BiometricStream';
 import SubscriptionPlans from '../features/billing/SubscriptionPlans';
+import { AuthProvider } from '../context/AuthContext';
 
 function Home() {
   return (
@@ -30,12 +31,12 @@ export default function App() {
   const [showIntro, setShowIntro] = useState(true);
 
   return (
-    <BrowserRouter>
-      <div className="min-h-screen bg-background-dark text-text-primary selection:bg-accent-rhododendron selection:text-white">
-        <AnimatePresence>
-          {showIntro && <IntroSequence onComplete={() => setShowIntro(false)} />}
-        </AnimatePresence>
-
+<AuthProvider>
+      <BrowserRouter>
+        <div className="min-h-screen bg-background-dark text-text-primary selection:bg-accent-rhododendron selection:text-white">
+          <AnimatePresence>
+            {showIntro && <IntroSequence onComplete={() => setShowIntro(false)} />}
+          </AnimatePresence>
         {!showIntro && (
           <>
             <Navbar />
@@ -54,5 +55,8 @@ export default function App() {
         )}
       </div>
     </BrowserRouter>
+    </AuthProvider>
+    
   );
+  
 }

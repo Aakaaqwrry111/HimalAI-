@@ -1,17 +1,37 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Map, Compass, Shield, User, Camera, Award, MessageSquare, Coffee, Zap } from 'lucide-react';
+import { Map, Compass, Shield, User, Camera, Award, MessageSquare, Zap, LogOut } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import ExplorerPassport from '../../features/passport/ExplorerPassport'; 
-import SubscriptionPlans from '../../features/billing/SubscriptionPlans';
+import { useAuth } from '../../context/AuthContext';
+
 export default function Navbar() {
   const [scrolled, setScrolled] = useState(false);
   const [isPassportOpen, setIsPassportOpen] = useState(false); 
+  const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
 
+  // Destructure loginWithGoogle directly from useAuth
+  const { user, loginWithGoogle, logout } = useAuth();
+  
+  // Ref to detect clicks outside the profile dropdown
+  const profileMenuRef = useRef<HTMLDivElement>(null);
+
+  // Scroll listener for sticky navigation styling
   useEffect(() => {
     const handleScroll = () => setScrolled(window.scrollY > 50);
     window.addEventListener('scroll', handleScroll);
     return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  // Close profile dropdown when clicking anywhere outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (profileMenuRef.current && !profileMenuRef.current.contains(event.target as Node)) {
+        setIsProfileMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
   return (
@@ -42,11 +62,11 @@ export default function Navbar() {
             <NavLink to="/teahouses" icon={<User size={16} />} text="Teahouses" />
           </div>
 
-          {/* --- RIGHT SIDE ACTIONS (PRO & PASSPORT) --- */}
-          <div className="flex items-center gap-3">
+          {/* --- RIGHT SIDE ACTIONS (PRO, PASSPORT, & AVATAR/LOGIN) --- */}
+          <div className="flex items-center gap-3 relative">
             
             <Link 
-              to="/billing/SubscriptionPlans"
+              to="/billing"
               className="flex items-center gap-1.5 bg-accent-temple-gold/10 hover:bg-accent-temple-gold/20 border border-accent-temple-gold/30 text-accent-temple-gold px-4 py-2.5 rounded-full transition-all active:scale-95 shadow-lg shadow-accent-temple-gold/5 hover:scale-105"
             >
               <Zap size={14} className="fill-accent-temple-gold" />
@@ -61,10 +81,75 @@ export default function Navbar() {
               <span className="text-sm font-bold tracking-wide">Passport</span>
             </button>
 
+            {/* --- DIRECT GOOGLE AUTH AVATAR / SIGN IN TRIGGER --- */}
+            {user ? (
+              <div className="relative" ref={profileMenuRef}>
+<button
+  onClick={() => setIsProfileMenuOpen(!isProfileMenuOpen)}
+  className="w-10 h-10 rounded-full border-2 border-accent-temple-gold overflow-hidden transition-transform hover:scale-105 ml-2 flex items-center justify-center bg-neutral-800"
+>
+  <img 
+    src={user.avatar} 
+    alt={user.name} 
+    referrerPolicy="no-referrer"
+    onError={(e) => {
+      // Automatic fallback to clean letter avatar if Google image fails to load
+      (e.target as HTMLImageElement).src = `https://ui-avatars.com/api/?name=${encodeURIComponent(user.name)}&background=D97706&color=fff`;
+    }}
+    className="w-full h-full object-cover" 
+  />
+</button>
+
+                {/* Animated Profile Dropdown */}
+                <AnimatePresence>
+                  {isProfileMenuOpen && (
+                    <motion.div 
+                      initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                      className="absolute right-0 mt-3 w-56 glass-panel bg-neutral-900/95 border border-white/10 rounded-2xl p-2 shadow-2xl z-50"
+                    >
+                      <div className="p-3 border-b border-white/10 mb-1">
+                        <p className="font-bold text-sm text-white truncate">{user.name}</p>
+                        <p className="text-xs text-white/50 truncate">{user.email}</p>
+                      </div>
+                      
+                      <div className="p-2 border-b border-white/10 mb-1 flex items-center justify-between text-xs text-white/70">
+                        <span>Status</span>
+                        {user.isPro ? (
+                          <span className="text-accent-temple-gold font-bold flex items-center gap-1"><Zap size={10}/> Pro Member</span>
+                        ) : (
+                          <span>Explorer</span>
+                        )}
+                      </div>
+
+                      <button
+                        onClick={() => {
+                          logout();
+                          setIsProfileMenuOpen(false);
+                        }}
+                        className="w-full flex items-center gap-2 px-3 py-2 text-xs font-bold text-red-400 hover:bg-red-500/10 rounded-xl transition-colors"
+                      >
+                        <LogOut size={14} /> Sign Out
+                      </button>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            ) : (
+              <button
+                onClick={loginWithGoogle}
+                className="bg-white/10 hover:bg-white/20 border border-white/20 text-white px-4 py-2.5 rounded-full text-xs font-bold uppercase tracking-wider transition-all hover:scale-105 ml-2"
+              >
+                Sign In
+              </button>
+            )}
+
           </div>
         </div>
       </motion.nav>
 
+      {/* Passport Modal */}
       <AnimatePresence>
         {isPassportOpen && <ExplorerPassport onClose={() => setIsPassportOpen(false)} />}
       </AnimatePresence>
