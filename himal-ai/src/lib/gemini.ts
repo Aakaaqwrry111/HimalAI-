@@ -1,7 +1,4 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
-
-const apiKey = (import.meta as any).env.VITE_GEMINI_API_KEY || '';
-const genAI = new GoogleGenerativeAI(apiKey);
+const groqApiKey = (import.meta as any).env.VITE_GROQ_API_KEY || '';
 
 export interface JourneyPlan {
   title: string;
@@ -52,18 +49,14 @@ const DUMMY_FALLBACK_JOURNEY: JourneyPlan = {
 
 export async function generateJourney(prompt: string): Promise<JourneyPlan> {
   // If no API key is present, instantly return the fallback plan gracefully
-  if (!apiKey) {
-    console.warn("Gemini API key is missing. Using fallback dummy journey plan.");
+  if (!groqApiKey) {
+    console.warn("Groq API key is missing. Using fallback dummy journey plan.");
     return DUMMY_FALLBACK_JOURNEY;
   }
 
-  const model = genAI.getGenerativeModel({ 
-    model: "gemini-2.0-flash"
-  });
-
   const fullPrompt = `
     You are an elite travel architect for Nepal. 
-    Return ONLY a valid JSON object matching this exact schema, with no markdown code blocks, backticks, or extra conversational text.
+    Return ONLY a valid JSON object matching this exact schema, with no extra text:
     {
       "title": "A captivating title",
       "days": [{ "dayNumber": 1, "title": "Day title", "description": "Storytelling description", "activities": ["Activity 1"] }],
@@ -75,50 +68,54 @@ export async function generateJourney(prompt: string): Promise<JourneyPlan> {
   `;
 
   try {
-    const result = await model.generateContent(fullPrompt);
-    const response = await result.response;
-    let text = response.text().trim();
-    
-    text = text.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/\s*```$/, "");
+    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${groqApiKey}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        model: "llama-3.3-70b-versatile",
+        messages: [{ role: "user", content: fullPrompt }],
+        // Groq supports JSON mode to guarantee structured output
+        response_format: { type: "json_object" }, 
+        temperature: 0.7
+      })
+    });
 
+    if (!response.ok) {
+        throw new Error(`Groq API Error: ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    const text = data.choices[0].message.content.trim();
+    
     return JSON.parse(text) as JourneyPlan;
   } catch (error) {
     console.warn("AI Generation encountered an error, falling back to dummy plan:", error);
     // Gracefully fallback to the dummy plan instead of crashing the UI
     return DUMMY_FALLBACK_JOURNEY;
   }
-  
 }
-// Add this to the bottom of your src/lib/gemini.ts file
 
 /**
- * Helper utility to convert a File object into the Base64 generative part format
+ * Helper utility to convert a File object into a standard Data URL (Base64)
+ * which is required for the OpenAI/Groq Vision API payload.
  */
-async function fileToGenerativePart(file: File) {
-  const base64EncodedDataPromise = new Promise<string>((resolve) => {
+async function fileToDataURL(file: File): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
-    reader.onloadend = () => resolve((reader.result as string).split(',')[1]);
+    reader.onloadend = () => resolve(reader.result as string);
+    reader.onerror = reject;
     reader.readAsDataURL(file);
   });
-  
-  return {
-    inlineData: { 
-      data: await base64EncodedDataPromise, 
-      mimeType: file.type 
-    },
-  };
 }
 
 /**
  * Analyzes an image for cultural context and route planning
  */
 export async function analyzeTrekImage(file: File, customPrompt?: string): Promise<string> {
-  if (!apiKey) throw new Error("Gemini API key is missing.");
-  
-  // gemini-1.5-flash natively supports multimodal (text + image) inputs!
-  const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-  
-  const imagePart = await fileToGenerativePart(file);
+  if (!groqApiKey) throw new Error("Groq API key is missing.");
   
   const systemPrompt = customPrompt || `
     You are an elite Himalayan trekking guide and cultural historian. 
@@ -130,9 +127,36 @@ export async function analyzeTrekImage(file: File, customPrompt?: string): Promi
   `;
 
   try {
-    const result = await model.generateContent([systemPrompt, imagePart]);
-    const response = await result.response;
-    return response.text();
+    // Converts the file directly into a `data:image/...;base64,...` string
+    const base64ImageUrl = await fileToDataURL(file);
+
+    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${groqApiKey}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        model: "llama-3.2-11b-vision-preview",
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "text", text: systemPrompt },
+              { type: "image_url", image_url: { url: base64ImageUrl } }
+            ]
+          }
+        ],
+        temperature: 0.5
+      })
+    });
+
+    if (!response.ok) {
+        throw new Error(`Groq Vision API Error: ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    return data.choices[0].message.content;
   } catch (error) {
     console.error("Vision AI Error:", error);
     throw new Error("The fog is too thick. Could not analyze the image.");
